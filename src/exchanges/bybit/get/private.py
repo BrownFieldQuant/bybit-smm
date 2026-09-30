@@ -112,7 +112,12 @@ class BybitPrivateGet:
 
         return await self.client.submit(self.session, endpoint, payload)
 
-    
+    async def wallet_balance(self):
+        payload = "accountType=UNIFIED&coin=USDT"
+        endpoint = f"{self.endpoints.WALLET_BALANCE}?{payload}"
+
+        return await self.client.submit(self.session, endpoint, payload)
+        
     async def current_position(self):
         payload = f"category=linear&symbol={self.symbol}"
         endpoint = f"{self.endpoints.CURRENT_POSITION}?{payload}"

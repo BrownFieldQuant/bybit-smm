@@ -32,10 +32,10 @@ size_offset: +0.0  # Changes quote size in quote units
 volatility_offset: +0.0 # Changes quote range in base units
 
 # Settings for Market Maker function 
-base_spread: 0.1 # In quote asset unit
+base_spread: 0.0002 # In quote asset unit
 number_of_orders: 2 # Total number of orders
-min_order_size: 1  # In base asset unit
-max_order_size: 1  # In base asset unit
+min_order_size: 66  # In base asset unit
+max_order_size: 66  # In base asset unit
 
 # Extreme value for inventory
 # Check README.md for more info regarding this 

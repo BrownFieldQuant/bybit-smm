@@ -11,8 +11,9 @@ from src.exchanges.bybit.websockets.handlers.orderbook import OrderBookBybit
 
 class SharedState:
 
-    CONFIG_DIR = ""  
-    PARAM_DIR = ""  
+    CONFIG_DIR = "config/bybit.yaml"
+    PARAM_DIR = "src/parameters.yaml"
+ 
 
     def __init__(self) -> None:
 

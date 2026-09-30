@@ -26,7 +26,7 @@ class PrivateGetLinks:
 @dataclass
 class PrivatePostLinks:
     CREATE_ORDER = "/v5/order/create"
-    CREATE_BATCH = "/unified/v3/private/order/create-batch"
+    CREATE_BATCH = "/v5/order/create-batch"
     AMEND_ORDER = "/v5/order/amend"
     AMEND_BATCH = "/unified/v3/private/order/replace-batch"
     CANCEL_SINGLE = "/v5/order/cancel"

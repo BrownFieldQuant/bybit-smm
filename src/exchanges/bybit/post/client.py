@@ -1,4 +1,3 @@
-
 import json
 import time
 import hashlib
@@ -12,130 +11,140 @@ from src.utils.misc import curr_dt
 
 class BybitPrivatePostClient:
 
-
     def __init__(self, api_key: str, api_secret: str) -> None:
         self.base_endpoint = BaseEndpoints.MAINNET1
         self.api_key = api_key
         self.api_secret = api_secret
         self.recvWindow = "5000"
-    
-    
-    def _sign(self, payload) -> dict:
-        self.timestamp = str(int(time.time()*1000))
-        param_str = "".join([self.timestamp, self.api_key, self.recvWindow, str(payload)])
 
-        header = {
-            "X-BAPI-TIMESTAMP": self.timestamp,
-            "X-BAPI-API-KEY": self.api_key,
-            "X-BAPI-RECV-WINDOW": self.recvWindow,
-        }
+    def _sign(self, payload: str) -> dict:
+        timestamp = str(int(time.time() * 1000))
 
-        hash_signature = hmac.new(
-            bytes(self.api_secret, "utf-8"), 
-            param_str.encode("utf-8"), 
-            hashlib.sha256
+        param_str = (
+            timestamp
+            + self.api_key
+            + self.recvWindow
+            + payload
         )
 
-        header["X-BAPI-SIGN"] = hash_signature.hexdigest()
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            param_str.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
-        return header
+        return {
+            "X-BAPI-TIMESTAMP": timestamp,
+            "X-BAPI-API-KEY": self.api_key,
+            "X-BAPI-RECV-WINDOW": self.recvWindow,
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-SIGN-TYPE": "2",
+            "Content-Type": "application/json",
+        }, timestamp
 
+    async def submit(
+        self,
+        session: aiohttp.ClientSession,
+        endpoint: str,
+        payload: dict,
+    ):
+        payload_str = json.dumps(
+            payload,
+            separators=(",", ":"),
+        )
 
-    async def submit(self, session: aiohttp.ClientSession, endpoint: str, payload: dict):
-    payload_str = json.dumps(payload, separators=(",", ":"))
-    full_endpoint = self.base_endpoint + endpoint
+        full_endpoint = self.base_endpoint + endpoint
+        max_retries = 3
 
-    max_retries = 3
+        for attempt in range(max_retries):
 
-    for attempt in range(max_retries):
-        self.signed_header = self._sign(payload_str)
+            try:
+                headers, timestamp = self._sign(payload_str)
 
-        try:
-            async with session.post(
-                full_endpoint,
-                headers={
-                    **self.signed_header,
-                    "Content-Type": "application/json",
-                },
-                data=payload_str,
-            ) as req:
+                async with session.post(
+                    full_endpoint,
+                    headers=headers,
+                    data=payload_str,
+                ) as req:
 
-                body = await req.text()
+                    body = await req.text()
 
-                # Debug HTTP-level failures
-                if req.status != 200:
+                    if req.status != 200:
+                        print(
+                            f"{curr_dt()}: HTTP {req.status}"
+                            f" | Endpoint: {endpoint}"
+                            f" | Body: {body[:500]}"
+                        )
+
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(attempt + 1)
+                            continue
+
+                        return None
+
+                    if not body.strip():
+                        print(
+                            f"{curr_dt()}: Empty response"
+                            f" | Endpoint: {endpoint}"
+                        )
+
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(attempt + 1)
+                            continue
+
+                        return None
+
+                    try:
+                        response = json.loads(body)
+
+                    except json.JSONDecodeError:
+                        print(
+                            f"{curr_dt()}: Invalid JSON response"
+                            f" | Endpoint: {endpoint}"
+                            f" | Body: {body[:500]}"
+                        )
+
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(attempt + 1)
+                            continue
+
+                        return None
+
+                    ret_code = response.get("retCode")
+                    ret_msg = response.get("retMsg", "")
+
+                    if ret_code == 0 and ret_msg in ("OK", "success"):
+
+                        return {
+                            "return": response.get("result"),
+                            "latency": (
+                                int(response["time"])
+                                - int(timestamp)
+                            ),
+                        }
+
                     print(
-                        f"{curr_dt()}: HTTP {req.status} "
-                        f"| Endpoint: {endpoint} "
-                        f"| Body: {body[:500]}"
+                        f"{curr_dt()}: {ret_msg}"
+                        f" (code={ret_code})"
+                        f" | Endpoint: {endpoint}"
                     )
-
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(attempt + 1)
-                        continue
 
                     return None
 
-                # Prevent JSONDecodeError from killing the bot
-                if not body.strip():
-                    print(
-                        f"{curr_dt()}: Empty response "
-                        f"| Endpoint: {endpoint}"
-                    )
-
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(attempt + 1)
-                        continue
-
-                    return None
-
-                try:
-                    response = json.loads(body)
-                except json.JSONDecodeError:
-                    print(
-                        f"{curr_dt()}: Invalid JSON response "
-                        f"| Endpoint: {endpoint} "
-                        f"| Body: {body[:500]}"
-                    )
-
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(attempt + 1)
-                        continue
-
-                    return None
-
-                # Bybit API response
-                if response.get("retMsg") in ("OK", "success"):
-
-                    return {
-                        "return": response.get("result"),
-                        "latency": int(response["time"])
-                        - int(self.timestamp),
-                    }
-
-                code = response.get("retCode")
-                msg = response.get("retMsg", "Unknown error")
+            except (
+                aiohttp.ClientError,
+                asyncio.TimeoutError,
+            ) as e:
 
                 print(
-                    f"{curr_dt()}: {msg} "
-                    f"(code={code}) "
-                    f"| Endpoint: {endpoint}"
+                    f"{curr_dt()}: Request error: {e}"
+                    f" | Endpoint: {endpoint}"
                 )
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(attempt + 1)
+                    continue
 
                 return None
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-
-            print(
-                f"{curr_dt()}: Request error: {e} "
-                f"| Endpoint: {endpoint}"
-            )
-
-            if attempt < max_retries - 1:
-                await asyncio.sleep(attempt + 1)
-                continue
-
-            return None
-
-    return None
-
+        return None

@@ -42,60 +42,100 @@ class BybitPrivatePostClient:
 
 
     async def submit(self, session: aiohttp.ClientSession, endpoint: str, payload: dict):
-        payload_str = json.dumps(payload)
+    payload_str = json.dumps(payload, separators=(",", ":"))
+    full_endpoint = self.base_endpoint + endpoint
+
+    max_retries = 3
+
+    for attempt in range(max_retries):
         self.signed_header = self._sign(payload_str)
-        full_endpoint = self.base_endpoint + endpoint
 
-        max_retries = 3  
-        
-        for attempt in range(max_retries):
+        try:
+            async with session.post(
+                full_endpoint,
+                headers={
+                    **self.signed_header,
+                    "Content-Type": "application/json",
+                },
+                data=payload_str,
+            ) as req:
 
-            try:
-                # Submit request to the session
-                req = await session.request("POST", full_endpoint, headers=self.signed_header, data=payload_str)
-                response = json.loads(await req.text())
+                body = await req.text()
 
-                # If submission is successful, return orderId and latency
-                if response["retMsg"] == "OK" or response["retMsg"] == "success":
+                # Debug HTTP-level failures
+                if req.status != 200:
+                    print(
+                        f"{curr_dt()}: HTTP {req.status} "
+                        f"| Endpoint: {endpoint} "
+                        f"| Body: {body[:500]}"
+                    )
 
-                    ret = {
-                        "return" : response["result"],
-                        "latency": int(response["time"]) - int(self.timestamp)
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(attempt + 1)
+                        continue
+
+                    return None
+
+                # Prevent JSONDecodeError from killing the bot
+                if not body.strip():
+                    print(
+                        f"{curr_dt()}: Empty response "
+                        f"| Endpoint: {endpoint}"
+                    )
+
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(attempt + 1)
+                        continue
+
+                    return None
+
+                try:
+                    response = json.loads(body)
+                except json.JSONDecodeError:
+                    print(
+                        f"{curr_dt()}: Invalid JSON response "
+                        f"| Endpoint: {endpoint} "
+                        f"| Body: {body[:500]}"
+                    )
+
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(attempt + 1)
+                        continue
+
+                    return None
+
+                # Bybit API response
+                if response.get("retMsg") in ("OK", "success"):
+
+                    return {
+                        "return": response.get("result"),
+                        "latency": int(response["time"])
+                        - int(self.timestamp),
                     }
 
-                    return ret
+                code = response.get("retCode")
+                msg = response.get("retMsg", "Unknown error")
 
-                # Error handling
-                else:
-                    code = response["retCode"]
-                    msg = response["retMsg"]
+                print(
+                    f"{curr_dt()}: {msg} "
+                    f"(code={code}) "
+                    f"| Endpoint: {endpoint}"
+                )
 
-                    # If rate limits hit, close session
-                    if msg == "too many visit":
-                        print(f"{curr_dt()}: Rate limits exceeded!")
-                        break
+                return None
 
-                    # If order doesnt exist anymore
-                    elif code == "110001":       
-                        print(f"{curr_dt()}: {msg} | Endpoint: {endpoint}")
-                        break
-                    
-                    # Enter other error handling here
-                    else:            
-                        print(f"{curr_dt()}: {msg} | Endpoint: {endpoint}")
-                        break
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
 
+            print(
+                f"{curr_dt()}: Request error: {e} "
+                f"| Endpoint: {endpoint}"
+            )
 
-            except Exception as e:
-                
-                # Resign the payload and retry the request after sleeping for 1s
-                if attempt < max_retries - 1:  
+            if attempt < max_retries - 1:
+                await asyncio.sleep(attempt + 1)
+                continue
 
-                    await asyncio.sleep(attempt)  
+            return None
 
-                    self.timestamp = str(int(time.time()*1000))
-                    self.signed_header = self._sign(payload)
+    return None
 
-                # Re-raise the last exception if all retries failed
-                else:
-                    raise e 

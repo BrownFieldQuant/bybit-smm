@@ -1,33 +1,55 @@
 import asyncio
+import math
+import requests
 
 from src.sharedstate import SharedState
 from src.exchanges.bybit.post.order import Order
 
 
+def get_bbo(symbol):
+    url = "https://api.bybit.com/v5/market/tickers"
+
+    response = requests.get(
+        url,
+        params={
+            "category": "linear",
+            "symbol": symbol,
+        },
+        timeout=10,
+    )
+
+    response.raise_for_status()
+    data = response.json()
+
+    if data["retCode"] != 0:
+        raise RuntimeError(data["retMsg"])
+
+    item = data["result"]["list"][0]
+
+    return float(item["bid1Price"]), float(item["ask1Price"])
+
+
 async def main():
     ss = SharedState()
 
+    # Lấy BBO THẬT từ Bybit REST
+    bid, ask = get_bbo(ss.bybit_symbol)
+
     print(f"Symbol : {ss.bybit_symbol}")
-    print(f"Bid    : {ss.bybit_bba[0][0]}")
-    print(f"Ask    : {ss.bybit_bba[1][0]}")
+    print(f"Bid    : {bid}")
+    print(f"Ask    : {ask}")
 
-    # ---------------------------------------
-    # Test order: ~5 USDT
-    # ---------------------------------------
+    # Buy thấp hơn best bid 1 tick -> PostOnly
+    price = bid - ss.bybit_tick_size
 
-    best_bid = ss.bybit_bba[0][0]
+    # Bybit minimum notional = 5 USDT.
+    # Dùng 5.10 USDT để có một chút buffer.
+    target_notional = 5.10
 
-    # Đặt thấp hơn best bid 1 tick để PostOnly không ăn market
-    price = best_bid - ss.bybit_tick_size
+    qty = math.ceil(target_notional / price)
 
-    # ~5 USDT notional
-    qty = max(
-        ss.bybit_lot_size,
-        int(5 / price)
-    )
-
-    # Round theo lot size
-    qty = int(qty / ss.bybit_lot_size) * int(ss.bybit_lot_size)
+    # Round UP theo lot size
+    qty = math.ceil(qty / ss.bybit_lot_size) * ss.bybit_lot_size
 
     notional = price * qty
 
@@ -56,10 +78,6 @@ async def main():
         print("Response:")
         print(response)
 
-        # ---------------------------------------
-        # Check Bybit response
-        # ---------------------------------------
-
         if response and response.get("return", {}).get("orderId"):
             order_id = response["return"]["orderId"]
 
@@ -71,8 +89,8 @@ async def main():
             print(f"Qty      : {qty}")
             print(f"Notional : {notional:.4f} USDT")
 
-            print("\nBạn có thể vào Bybit kiểm tra/cancel lệnh.")
-            print("Test kết thúc.")
+            print("\nLệnh đang nằm trên Bybit.")
+            print("Bạn tự cancel trên web khi muốn.")
 
         else:
             print("\n================================")
@@ -80,11 +98,7 @@ async def main():
             print("================================")
 
     finally:
-        # Order() tạo aiohttp session nên đóng lại
-        try:
-            await order.session.close()
-        except Exception:
-            pass
+        await order.session.close()
 
 
 if __name__ == "__main__":

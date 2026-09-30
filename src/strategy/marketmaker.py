@@ -14,6 +14,22 @@ class CalculateFeatures:
     """
     Some features are disabled for Bybit-only streams    
     """
+    def _prices(self, bid_skew, ask_skew, num_bids, num_asks):
+
+    best_bid = float(self.ss.bybit_bba[0][0])
+    best_ask = float(self.ss.bybit_bba[1][0])
+
+    # NEVER quote using uninitialized BBA
+    if (
+        not np.isfinite(best_bid)
+        or not np.isfinite(best_ask)
+        or best_bid <= 0
+        or best_ask <= 0
+        or best_bid >= best_ask
+    ):
+        raise RuntimeError(
+            f"Invalid Bybit BBA: bid={best_bid}, ask={best_ask}"
+        )
 
     def __init__(self, sharedstate: SharedState) -> None:
         self.ss = sharedstate

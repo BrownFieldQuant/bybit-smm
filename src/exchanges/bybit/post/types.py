@@ -78,26 +78,41 @@ class OrderTypesSpot(OrderBase):
 
 class OrderTypesFutures(OrderBase):
 
-
     def __init__(self, symbol: str):
         super().__init__(symbol, OrderCategory.LINEAR)
 
+    def _position_idx(self, side: str) -> int:
+        # Hedge Mode:
+        # Buy  -> Long position
+        # Sell -> Short position
+        return 1 if side == "Buy" else 2
 
     def limit(self, order):
-        return self.create_limit_payload(order[0], order[1], order[2])
-
+        payload = self.create_limit_payload(
+            order[0],
+            order[1],
+            order[2]
+        )
+        payload["positionIdx"] = self._position_idx(order[0])
+        return payload
 
     def market(self, order):
-        return self.create_market_payload(order[0], order[1])
-
+        payload = self.create_market_payload(
+            order[0],
+            order[1]
+        )
+        payload["positionIdx"] = self._position_idx(order[0])
+        return payload
 
     def amend(self, order):
-        return self.create_amend_payload(order[0], order[1], order[2])
-
+        return self.create_amend_payload(
+            order[0],
+            order[1],
+            order[2]
+        )
 
     def cancel(self, orderId):
         return self.create_cancel_payload(orderId)
-
 
     def cancel_all(self):
         return self._base_payload()

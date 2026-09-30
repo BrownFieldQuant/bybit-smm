@@ -51,20 +51,38 @@ class Order:
         return await self._submit(endpoint, payload)
 
 
-    async def order_batch(self, orders: list) -> dict | None:
-        batch_endpoint = self.endpoints.CREATE_BATCH
-        tasks = []
+    async def order_batch(self, orders: list) -> list:
+    batch_endpoint = self.endpoints.CREATE_BATCH
+    tasks = []
 
-        # Split the orders into chunks of 10
-        for i in range(0, len(orders), 10):
-            str_orders = [self._order_to_str(order) for order in orders[i:i+10]]
-            batch = [self.futures.limit(order) for order in str_orders]
-            batch_payload = {"category": "linear", "request": batch}
-            task = self._sessionless_submit(batch_endpoint, batch_payload)
-            tasks.append(task)
+    for i in range(0, len(orders), 10):
+        str_orders = [
+            self._order_to_str(order)
+            for order in orders[i:i + 10]
+        ]
 
-        await asyncio.gather(*tasks)
-        await self.session.close()
+        batch = [
+            self.futures.limit(order)
+            for order in str_orders
+        ]
+
+        batch_payload = {
+            "category": "linear",
+            "request": batch,
+        }
+
+        tasks.append(
+            self._sessionless_submit(
+                batch_endpoint,
+                batch_payload
+            )
+        )
+
+    if not tasks:
+        return []
+
+    return await asyncio.gather(*tasks)
+
 
 
     async def amend(self, order: tuple) -> dict | None:
